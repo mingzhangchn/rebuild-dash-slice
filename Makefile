@@ -1,7 +1,7 @@
 
 
-SRC=mp4_slice.cpp p test.cpp 
-OBJ=mp4_slice.o  test.o 
+SRC=mp4_rebuild.cpp p test.cpp 
+OBJ=mp4_rebuild.o  test.o 
 
 APP=test
 
