@@ -4,17 +4,20 @@ SRC=mp4_rebuild.cpp p test.cpp
 OBJ=mp4_rebuild.o  test.o 
 
 APP=test
+LIB=libmp4rebuild.so
 
 
-INCLUDES = -I./
+INCLUDES = -I./include
 
 .PONEY:all
 
 all:$(APP) 
 
+$(LIB):$(OBJ)
+	@g++  -shared $(OBJ) ./lib/libmp4v2.a -o $@ 
 
 $(APP):$(OBJ) 
-	@g++  $(OBJ) -lmp4v2 -o $@ 
+	@g++  $(OBJ) ./lib/libmp4v2.a -o $@ 
 
     
 %.o:%.cpp
