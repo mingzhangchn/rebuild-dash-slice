@@ -14,6 +14,9 @@ unsigned char *sequenceParameterSet = NULL;
 int pictureParameterSetLength = 0;
 unsigned char *pictureParameterSet = NULL;
 
+int video_w = 0;
+int video_h = 0;
+
 MP4FileHandle file_handle;
 MP4TrackId video_trackId;
 MP4TrackId audio_trackId;
@@ -169,6 +172,19 @@ int mp4_init(const char *initFile, const char* destFile)
                 }
                 saveBoxInfo(fp, trakBoxInfo[index][i].size - 8, mdiaBoxInfo[index]);   
             }  
+            if (trakBoxInfo[index][i].type.compare("tkhd") == 0){
+                if (index == 0){
+                    if (fseek(fp, trakBoxInfo[index][i].pos + 82, SEEK_SET) != 0){
+                        printf("seek error\n");
+                        break;
+                    }
+                    unsigned char buf[8] = {0};
+                    fread(buf, 8, 1, fp);
+                    //printf("%02x%02x%02x%02x%02x%02x%02x%02x\n", buf[0], buf[1],buf[2],buf[3],buf[4], buf[5],buf[6],buf[7]);
+                    video_w = byteToUint32(buf);
+                    video_h = byteToUint32(&(buf[4]));
+                }
+            }             
         }        
     }
     
@@ -275,12 +291,14 @@ int mp4_init(const char *initFile, const char* destFile)
                     fread(tempBuf, 8, 1, fp);   
                     int blen = byteToUint32(tempBuf);
                     printf("%c%c%c%c:len:%d\n", tempBuf[4],tempBuf[5],tempBuf[6],tempBuf[7], blen);
+#if 0                    
                     if (memcmp(&(tempBuf[4]), "avc1", 4) == 0){
                         printf("-----------------\n");
                         fseek(fp, 78, SEEK_CUR);
                         unsigned char buf[8] = {0};
                         int ret = fread(buf, 8, 1, fp);
                         int avccLen = byteToUint32(buf);
+                        
                         if (memcmp(&(buf[4]), "avcC", 4) == 0){     
                             unsigned char avccBuf[avccLen];
                             fread(avccBuf, avccLen - 8, 1, fp);
@@ -312,10 +330,10 @@ int mp4_init(const char *initFile, const char* destFile)
                             }
                             printf(" %x %x %x\n", avccBuf[5], avccBuf[6], avccBuf[7]);
                             
-                        }                  
-                    }                    
+                        } 
+                    }   
+#endif                    
                 }
-                
             }
             
             if (stblBoxInfo[tIndex][i].type.compare("stsc") == 0){
@@ -397,199 +415,7 @@ int mp4_init(const char *initFile, const char* destFile)
                 sampleList[tIndex] = (SampleInfo*)malloc(sizeof(SampleInfo)*sampleCount);
             }  
         }         
-#if 0
-        if (!sampleList[tIndex] || !chunkList[tIndex]){
-            printf("sampleList or chunkList malloc error\n");
-            return -1;
-        }
-        
-        for(int i = 0; i < stblBoxInfo[tIndex].size(); ++i){//make sure  sampleList has been created
-            if (stblBoxInfo[tIndex][i].type.compare("stts") == 0){
-                if (fseek(fp, stblBoxInfo[tIndex][i].pos + 8, SEEK_SET) != 0){
-                    printf("seek error\n");
-                    break;
-                }
-                fseek(fp, 4, SEEK_CUR);
-                unsigned char buf[4] = {0};
-                int ret = fread(buf, 4, 1, fp);
-                int entry_count = byteToUint32(buf);
-                std::cout<<"stts entry count:"<<entry_count<<std::endl;
-                
-                if (entry_count == 1){
-                    unsigned char tempBuf[8] = {0};
-                    fread(tempBuf, 1, 8, fp);      
-                    unsigned int sample_count = byteToUint32(tempBuf);
-                    unsigned int sample_delta = byteToUint32(tempBuf + 4);
-                    //printf("1 sample_count: %d, sample_delta:%d\n", sample_count, sample_delta); 
-                    int sample_index = 0;
-                    while(sample_index < sampleTotalCount[tIndex]){
-                        sampleList[tIndex][sample_index].delta = sample_delta;
-                        sample_index++;
-                    }
-                }else if(entry_count > 1){
-                    int sample_index = 0;
-                    int entry_count_index = 0;
-                    while(entry_count_index < entry_count){
-                        unsigned char tempBuf[8] = {0};
-                        fread(tempBuf, 1, 8, fp);
-                        unsigned int sample_count = byteToUint32(tempBuf);
-                        unsigned int sample_delta = byteToUint32(tempBuf + 4);
-                        //printf("2 sample_count: %d, sample_delta:%d\n", sample_count, sample_delta);  
-                        
-                        int sample_count_index = 0;
-                        while(sample_count_index < sample_count && sample_index < sampleTotalCount[tIndex]){
-                            sampleList[tIndex][sample_index].delta = sample_delta;
-                            sample_index++;
-                            sample_count_index++;
-                        }                        
-                        
-                        entry_count_index++;
-                    }                    
-                }
-                else{
-                    printf("No stts entry found\n");
-                    return -1;
-                }
-            }              
-        }        
-        
-        printf("chunk:%d, sample:%d\n", chunkCount, sampleCount);
-
-        ChunkInfo *chunk_list = chunkList[tIndex];
-        SampleInfo *sample_list = sampleList[tIndex];
-        
-        if (stscList[tIndex].size() == 1){
-            if (chunkCount == sampleCount){
-                for (int i = 0; i < chunkCount; ++i){
-                    chunk_list[i].chunk_index = i + 1;
-                    chunk_list[i].sample_count = 1;
-                    chunk_list[i].sample_description_index = 1;
-                    
-                    sample_list[i].sample_index = i + 1;
-                    sample_list[i].chunk_index = i + 1;
-                    sample_list[i].sample_description_index = 1;
-                }      
-            }
-            else{
-                printf("Not process yet!\n");
-            }
-        }
-        else{
-            int chunkIndex = 0; 
-            int lastChunkIndex = chunkCount + 1;
-            for (int i = stscList[tIndex].size() - 1; i >= 0 ; i--){
-                int count = lastChunkIndex - stscList[tIndex][i].first_chunk;
-                
-                chunkIndex = lastChunkIndex - 1 - 1;
-                while(count > 0 ){
-                    chunk_list[chunkIndex].chunk_index = chunkIndex + 1;
-                    chunk_list[chunkIndex].sample_count = stscList[tIndex][i].samples_per_chunk;
-                    chunk_list[chunkIndex].sample_description_index = stscList[tIndex][i].sample_description_index;
-                    count--;
-                    chunkIndex--;
-                }
-                
-                lastChunkIndex = stscList[tIndex][i].first_chunk;
-            }
-            
-            int sampleIndex = 0;
-            for (int i = 0; i < chunkCount; ++i){
-                int count = chunk_list[i].sample_count;
-                while(count > 0){
-                    sample_list[sampleIndex].sample_index = sampleIndex + 1;
-                    sample_list[sampleIndex].chunk_index = chunk_list[i].chunk_index;
-                    sample_list[sampleIndex].sample_description_index = chunk_list[i].sample_description_index;
-                    count--;
-                    sampleIndex++;
-                }
-            }
-        }
-        
-        for (int i = 0; i < chunkCount; ++i){
-            chunk_list[i].offset = stcoList[tIndex][i];
-        }
-        
-        for (int i = 0; i < sampleCount; ++i){
-            sample_list[i].size = stszList[tIndex][i];//this size will be used latter
-            
-            int chunkIndex = sample_list[i].chunk_index;
-            int chunkOffset = chunk_list[chunkIndex -1].offset;
-            int size = 0;
-            for(int j = i -1; j >= 0; j--){
-                if (sample_list[j].chunk_index == chunkIndex){
-                    size += sample_list[j].size;//use size
-                }else{
-                    break;
-                }
-            }
-            
-            sample_list[i].offset = chunkOffset + size;
-            //printf("\nsample:%d,offset:%d, size:%d\n", i+1, sample_list[i].offset, sample_list[i].size);
-            
-            if(0){//test
-                if (fseek(fp, sample_list[i].offset, SEEK_SET) != 0){
-                    printf("seek error\n");
-                }    
-                
-                unsigned char buf[16] = {0};
-                int ret = fread(buf, 1, 16, fp);   
-                if (ret != 16){
-                    printf("read error\n");
-                }
-                printf("\n");
-                for (int k = 0; k < 16; ++k){
-                    printf("%02x ", buf[k]);
-                }
-            }
-        }
-#endif    
     }
-
-    file_handle = MP4CreateEx(destFile);//创建mp4文件
-    if (file_handle == MP4_INVALID_FILE_HANDLE){
-        printf("open file_handle fialed.\n");
-        return -1;
-    }
-    
-    MP4SetTimeScale(file_handle, 1000);
-  
-    video_trackId = MP4AddH264VideoTrack(file_handle, 12800, 12800 / 25, 1280, 720,
-                                            sequenceParameterSet[1], //sps[1] AVCProfileIndication
-                                            sequenceParameterSet[2], //sps[2] profile_compat
-                                            sequenceParameterSet[3], //sps[3] AVCLevelIndication
-                                            3); // 4 bytes length before each NAL unit
-    if (video_trackId == MP4_INVALID_TRACK_ID){
-        printf("add video_trackId track failed.\n");
-        return -1;
-    }
-    
-    MP4SetVideoProfileLevel(file_handle, 0x01);//?
-
-    MP4AddH264SequenceParameterSet(file_handle,video_trackId,sequenceParameterSet,sequenceParameterSetLength);
-    MP4AddH264PictureParameterSet(file_handle,video_trackId,pictureParameterSet, pictureParameterSetLength);    
-    
-    audio_trackId = MP4AddAudioTrack(file_handle, 48000, 1024, MP4_MPEG4_AUDIO_TYPE);
-    if (audio_trackId == MP4_INVALID_TRACK_ID){
-        printf("add audio_trackId track failed.\n");
-        return -1;
-    }
-    printf("audio_trackId:%d\n", audio_trackId);
-    MP4SetAudioProfileLevel(file_handle, 0x2);
-    
-#if 0
-    unsigned char Buf[409600] = {0};
-    for(int i = 0; i < sampleTotalCount[0]; ++i){        
-        fseek(fp, sampleList[0][i].offset, SEEK_SET);
-        fread(Buf, sampleList[0][i].size, 1, fp);              
-        MP4WriteSample(file_handle, video_trackId, (uint8_t*)(Buf), sampleList[0][i].size, sampleList[0][i].delta, 0, 1);
-    }
-    
-    for(int i = 0; i < sampleTotalCount[1]; ++i){
-        fseek(fp, sampleList[1][i].offset, SEEK_SET);
-        fread(Buf, sampleList[1][i].size, 1, fp);
-        MP4WriteSample(file_handle, audio_trackId, (uint8_t*)Buf, sampleList[1][i].size , sampleList[1][i].delta, 0, 1);
-    }  
-#endif
     
     for(int i = 0; i < trackCount; ++i){
         if (chunkList[i]){
@@ -601,27 +427,25 @@ int mp4_init(const char *initFile, const char* destFile)
             sampleList[i] = NULL;
         }
     }
-    fclose(fp);
+    fclose(fp);    
     
-    if (pictureParameterSet){
-        free(pictureParameterSet);
-        pictureParameterSet = NULL;
+    //create mp4
+    file_handle = MP4CreateEx(destFile);
+    if (file_handle == MP4_INVALID_FILE_HANDLE){
+        printf("open file_handle fialed.\n");
+        return -1;
     }
     
-    if (sequenceParameterSet){
-        free(sequenceParameterSet);
-        sequenceParameterSet = NULL;
-    }
+    MP4SetTimeScale(file_handle, 1000);
     
     MP4FileHandle srcFile = MP4Modify(initFile);
-    MP4TrackId srcAtrack = MP4FindTrackId(srcFile,1); 
     
-    uint8_t*    pConfig = NULL;
-    uint32_t configSize = 0;
-    MP4GetTrackESConfiguration(srcFile,srcAtrack, &pConfig, &configSize );
+    //int tCount = MP4GetNumberOfTracks(srcFile);
+    //printf("---------trackCount:%d\n", tCount);
 
-    MP4SetTrackESConfiguration(file_handle,audio_trackId,pConfig,configSize);
-    
+    video_trackId =  MP4CopyTrack(srcFile, MP4FindTrackId(srcFile,0), file_handle);     
+    audio_trackId =  MP4CopyTrack(srcFile, MP4FindTrackId(srcFile,1), file_handle);    
+
     printf("mp4 init finish\n");
     
     return 0;
@@ -688,7 +512,7 @@ int mp4_add_frame(const char * m4sFile)
                     fread(buf, 8, 1, fp);
                     int sampleCount = byteToUint32(buf);  
                     int dataOffset = byteToUint32(&(buf[4])); 
-                    printf("sampleCount:%d, dataOffset:%d\n", sampleCount, dataOffset);
+                    //printf("sampleCount:%d, dataOffset:%d\n", sampleCount, dataOffset);
                     int sampleListSize = sampleCount * 8;
                     unsigned char sampleListBuf[sampleListSize];
                     fread(sampleListBuf, sampleListSize, 1, fp);
@@ -696,17 +520,17 @@ int mp4_add_frame(const char * m4sFile)
                     for(int s = 0; s < sampleCount; ++s){
                         int duration = byteToUint32(sampleListBuf+s*8);
                         int size = byteToUint32(sampleListBuf+s*8 + 4);
-                        printf("duration:%d, size:%d\n", duration,size);
+                        //printf("duration:%d, size:%d\n", duration,size);
                         int sampleOffset = moofPos + dataOffset + dataTotalSize; 
                         fseek(fp, sampleOffset, SEEK_SET);
                         unsigned char buf[size];
                         fread(buf, size, 1, fp);
                         if (trackId == 1){
-                            printf("video_trackId:%d\n", video_trackId);
+                            //printf("video_trackId:%d\n", video_trackId);
                             MP4WriteSample(file_handle, video_trackId, (uint8_t*)buf, size , duration, 0, 1);
                         }
                         else if(trackId == 2){
-                            printf("audio_trackId:%d\n", audio_trackId);
+                            //printf("audio_trackId:%d\n", audio_trackId);
                             MP4WriteSample(file_handle, audio_trackId, (uint8_t*)buf, size , duration, 0, 1);
                         }
                         
@@ -718,7 +542,6 @@ int mp4_add_frame(const char * m4sFile)
         trafBoxInfo.clear();
     }  
 
-    
     return 0;
 }
 
